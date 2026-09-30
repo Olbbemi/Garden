@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Link Garden instructions and todo on the main worktree's initial checkout."""
+
+from pathlib import Path
+import re
+import sys
+
+# Load the linker from this checkout without writing bytecode into the repository.
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from link_codex_agents import LinkError, git, is_garden, link_instructions, repository_root
+from link_shared_todo import link_shared_todo, shared_todo_paths
+
+
+def main():
+    if len(sys.argv) != 4:
+        print("Usage: post-checkout OLD_HEAD NEW_HEAD BRANCH_FLAG", file=sys.stderr)
+        return 1
+    old, _new, branch = sys.argv[1:]
+    # Clone's first checkout has a null old HEAD. Ordinary checkouts do not.
+    if branch != "1" or not re.fullmatch(r"(?:0{40}|0{64})", old):
+        return 0
+    try:
+        root = repository_root(Path.cwd())
+        git_dir = Path(git("rev-parse", "--absolute-git-dir", cwd=root)).resolve()
+        common_dir = Path(git("rev-parse", "--git-common-dir", cwd=root))
+        if not common_dir.is_absolute():
+            common_dir = root / common_dir
+        # worktree add also passes a null old HEAD; keep the main checkout's link.
+        if git_dir != common_dir.resolve() or not is_garden(root):
+            return 0
+        # Detect todo conflicts before creating the instructions link.
+        shared_todo_paths(root)
+        link_instructions(root)
+        link_shared_todo(root)
+    except (LinkError, OSError, RuntimeError) as error:
+        print(f"Garden post-checkout: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
